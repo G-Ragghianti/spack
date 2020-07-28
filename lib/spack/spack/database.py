@@ -18,33 +18,41 @@ Prior to the implementation of this store, a directory layout served
 as the authoritative database of packages in Spack.  This module
 provides a cache and a sanity checking mechanism for what is in the
 filesystem.
-
 """
-import datetime
-import time
-import os
-import sys
-import socket
+
 import contextlib
-from six import string_types
-from six import iteritems
+import datetime
+import os
+import six
+import socket
+import sys
+import time
+try:
+    import uuid
+    _use_uuid = True
+except ImportError:
+    _use_uuid = False
+    pass
 
-from ruamel.yaml.error import MarkedYAMLError, YAMLError
-
+import llnl.util.filesystem as fs
 import llnl.util.tty as tty
-from llnl.util.filesystem import mkdirp
 
-import spack.store
 import spack.repo
 import spack.spec
+import spack.store
 import spack.util.lock as lk
-import spack.util.spack_yaml as syaml
 import spack.util.spack_json as sjson
-from spack.filesystem_view import YamlFilesystemView
-from spack.util.crypto import bit_length
 from spack.directory_layout import DirectoryLayoutError
 from spack.error import SpackError
+from spack.filesystem_view import YamlFilesystemView
+from spack.util.crypto import bit_length
 from spack.version import Version
+
+
+@contextlib.contextmanager
+def nullcontext(*args, **kwargs):
+    yield
+
 
 # TODO: Provide an API automatically retyring a build after detecting and
 # TODO: clearing a failure.
@@ -84,6 +92,17 @@ _pkg_lock_timeout = None
 
 # Types of dependencies tracked by the database
 _tracked_deps = ('link', 'run')
+
+# Default list of fields written for each install record
+default_install_record_fields = [
+    'spec',
+    'ref_count',
+    'path',
+    'installed',
+    'explicit',
+    'installation_time',
+    'deprecated_for',
+]
 
 
 def _now():
@@ -185,17 +204,17 @@ class InstallRecord(object):
         else:
             return InstallStatuses.MISSING in installed
 
-    def to_dict(self):
-        rec_dict = {
-            'spec': self.spec.to_node_dict(),
-            'path': self.path,
-            'installed': self.installed,
-            'ref_count': self.ref_count,
-            'explicit': self.explicit,
-            'installation_time': self.installation_time,
-        }
-        if self.deprecated_for:
-            rec_dict.update({'deprecated_for': self.deprecated_for})
+    def to_dict(self, include_fields=default_install_record_fields):
+        rec_dict = {}
+
+        for field_name in include_fields:
+            if field_name == 'spec':
+                rec_dict.update({'spec': self.spec.to_node_dict()})
+            elif field_name == 'deprecated_for' and self.deprecated_for:
+                rec_dict.update({'deprecated_for': self.deprecated_for})
+            else:
+                rec_dict.update({field_name: getattr(self, field_name)})
+
         return rec_dict
 
     @classmethod
@@ -204,8 +223,11 @@ class InstallRecord(object):
         d.pop('spec', None)
 
         # Old databases may have "None" for path for externals
-        if d['path'] == 'None':
+        if 'path' not in d or d['path'] == 'None':
             d['path'] = None
+
+        if 'installed' not in d:
+            d['installed'] = False
 
         return InstallRecord(spec, **d)
 
@@ -273,7 +295,8 @@ class Database(object):
     _prefix_failures = {}
 
     def __init__(self, root, db_dir=None, upstream_dbs=None,
-                 is_upstream=False):
+                 is_upstream=False, enable_transaction_locking=True,
+                 record_fields=default_install_record_fields):
         """Create a Database for Spack installations under ``root``.
 
         A Database is a cache of Specs data from ``$prefix/spec.yaml``
@@ -284,29 +307,28 @@ class Database(object):
         exist.  This is the ``db_dir``.
 
         The Database will attempt to read an ``index.json`` file in
-        ``db_dir``.  If it does not find one, it will fall back to read
-        an ``index.yaml`` if one is present.  If that does not exist, it
-        will create a database when needed by scanning the entire
-        Database root for ``spec.yaml`` files according to Spack's
-        ``DirectoryLayout``.
+        ``db_dir``.  If that does not exist, it will create a database
+        when needed by scanning the entire Database root for ``spec.yaml``
+        files according to Spack's ``DirectoryLayout``.
 
         Caller may optionally provide a custom ``db_dir`` parameter
-        where data will be stored.  This is intended to be used for
+        where data will be stored. This is intended to be used for
         testing the Database class.
 
+        This class supports writing buildcache index files, in which case
+        certain fields are not needed in each install record, and no
+        transaction locking is required.  To use this feature, provide
+        ``enable_transaction_locking=False``, and specify a list of needed
+        fields in ``record_fields``.
         """
         self.root = root
 
-        if db_dir is None:
-            # If the db_dir is not provided, default to within the db root.
-            self._db_dir = os.path.join(self.root, _db_dirname)
-        else:
-            # Allow customizing the database directory location for testing.
-            self._db_dir = db_dir
+        # If the db_dir is not provided, default to within the db root.
+        self._db_dir = db_dir or os.path.join(self.root, _db_dirname)
 
         # Set up layout of database files within the db dir
-        self._old_yaml_index_path = os.path.join(self._db_dir, 'index.yaml')
         self._index_path = os.path.join(self._db_dir, 'index.json')
+        self._verifier_path = os.path.join(self._db_dir, 'index_verifier')
         self._lock_path = os.path.join(self._db_dir, 'lock')
 
         # This is for other classes to use to lock prefix directories.
@@ -322,12 +344,13 @@ class Database(object):
 
         # Create needed directories and files
         if not os.path.exists(self._db_dir):
-            mkdirp(self._db_dir)
+            fs.mkdirp(self._db_dir)
 
-        if not os.path.exists(self._failure_dir):
-            mkdirp(self._failure_dir)
+        if not os.path.exists(self._failure_dir) and not is_upstream:
+            fs.mkdirp(self._failure_dir)
 
         self.is_upstream = is_upstream
+        self.last_seen_verifier = ''
 
         # initialize rest of state.
         self.db_lock_timeout = (
@@ -360,14 +383,23 @@ class Database(object):
         # message)
         self._fail_when_missing_deps = False
 
+        if enable_transaction_locking:
+            self._write_transaction_impl = lk.WriteTransaction
+            self._read_transaction_impl = lk.ReadTransaction
+        else:
+            self._write_transaction_impl = nullcontext
+            self._read_transaction_impl = nullcontext
+
+        self._record_fields = record_fields
+
     def write_transaction(self):
         """Get a write lock context manager for use in a `with` block."""
-        return lk.WriteTransaction(
+        return self._write_transaction_impl(
             self.lock, acquire=self._read, release=self._write)
 
     def read_transaction(self):
         """Get a read lock context manager for use in a `with` block."""
-        return lk.ReadTransaction(self.lock, acquire=self._read)
+        return self._read_transaction_impl(self.lock, acquire=self._read)
 
     def _failed_spec_path(self, spec):
         """Return the path to the spec's failure file, which may not exist."""
@@ -377,6 +409,23 @@ class Database(object):
 
         return os.path.join(self._failure_dir,
                             '{0}-{1}'.format(spec.name, spec.full_hash()))
+
+    def clear_all_failures(self):
+        """Force remove install failure tracking files."""
+        tty.debug('Releasing prefix failure locks')
+        for pkg_id in list(self._prefix_failures.keys()):
+            lock = self._prefix_failures.pop(pkg_id, None)
+            if lock:
+                lock.release_write()
+
+        # Remove all failure markings (aka files)
+        tty.debug('Removing prefix failure tracking files')
+        for fail_mark in os.listdir(self._failure_dir):
+            try:
+                os.remove(os.path.join(self._failure_dir, fail_mark))
+            except OSError as exc:
+                tty.warn('Unable to remove failure marking file {0}: {1}'
+                         .format(fail_mark, str(exc)))
 
     def clear_failure(self, spec, force=False):
         """
@@ -554,12 +603,14 @@ class Database(object):
             prefix_lock.release_write()
 
     def _write_to_file(self, stream):
-        """Write out the databsae to a JSON file.
+        """Write out the database in JSON format to the stream passed
+        as argument.
 
         This function does not do any locking or transactions.
         """
         # map from per-spec hash code to installation record.
-        installs = dict((k, v.to_dict()) for k, v in self._data.items())
+        installs = dict((k, v.to_dict(include_fields=self._record_fields))
+                        for k, v in self._data.items())
 
         # database includes installation list and version.
 
@@ -576,9 +627,8 @@ class Database(object):
 
         try:
             sjson.dump(database, stream)
-        except YAMLError as e:
-            raise syaml.SpackYAMLError(
-                "error writing YAML database:", str(e))
+        except (TypeError, ValueError) as e:
+            raise sjson.SpackJSONError("error writing JSON database:", str(e))
 
     def _read_spec_from_dict(self, hash_key, installs):
         """Recursively construct a spec from a hash in a YAML database.
@@ -649,28 +699,15 @@ class Database(object):
 
                 spec._add_dependency(child, dtypes)
 
-    def _read_from_file(self, stream, format='json'):
-        """
-        Fill database from file, do not maintain old data
-        Translate the spec portions from node-dict form to spec form
+    def _read_from_file(self, filename):
+        """Fill database from file, do not maintain old data.
+        Translate the spec portions from node-dict form to spec form.
 
         Does not do any locking.
         """
-        if format.lower() == 'json':
-            load = sjson.load
-        elif format.lower() == 'yaml':
-            load = syaml.load
-        else:
-            raise ValueError("Invalid database format: %s" % format)
-
         try:
-            if isinstance(stream, string_types):
-                with open(stream, 'r') as f:
-                    fdata = load(f)
-            else:
-                fdata = load(stream)
-        except MarkedYAMLError as e:
-            raise syaml.SpackYAMLError("error parsing YAML database:", str(e))
+            with open(filename, 'r') as f:
+                fdata = sjson.load(f)
         except Exception as e:
             raise CorruptDatabaseError("error parsing database:", str(e))
 
@@ -682,12 +719,12 @@ class Database(object):
                 raise CorruptDatabaseError(
                     "Spack database is corrupt: %s" % msg, self._index_path)
 
-        check('database' in fdata, "No 'database' attribute in YAML.")
+        check('database' in fdata, "no 'database' attribute in JSON DB.")
 
         # High-level file checks
         db = fdata['database']
-        check('installs' in db, "No 'installs' in YAML DB.")
-        check('version' in db, "No 'version' in YAML DB.")
+        check('installs' in db, "no 'installs' in JSON DB.")
+        check('version' in db, "no 'version' in JSON DB.")
 
         installs = db['installs']
 
@@ -707,7 +744,8 @@ class Database(object):
 
                 self.reindex(spack.store.layout)
                 installs = dict(
-                    (k, v.to_dict()) for k, v in self._data.items()
+                    (k, v.to_dict(include_fields=self._record_fields))
+                    for k, v in self._data.items()
                 )
 
         def invalid_record(hash_key, error):
@@ -763,7 +801,6 @@ class Database(object):
         """Build database index from scratch based on a directory layout.
 
         Locks the DB if it isn't locked already.
-
         """
         if self.is_upstream:
             raise UpstreamDatabaseLockingError(
@@ -927,7 +964,6 @@ class Database(object):
         after the start of the next transaction, when it read from disk again.
 
         This routine does no locking.
-
         """
         # Do not write if exceptions were raised
         if type is not None:
@@ -941,6 +977,11 @@ class Database(object):
             with open(temp_file, 'w') as f:
                 self._write_to_file(f)
             os.rename(temp_file, self._index_path)
+            if _use_uuid:
+                with open(self._verifier_path, 'w') as f:
+                    new_verifier = str(uuid.uuid4())
+                    f.write(new_verifier)
+                    self.last_seen_verifier = new_verifier
         except BaseException as e:
             tty.debug(e)
             # Clean up temp file if something goes wrong.
@@ -952,35 +993,33 @@ class Database(object):
         """Re-read Database from the data in the set location.
 
         This does no locking, with one exception: it will automatically
-        migrate an index.yaml to an index.json if possible. This requires
-        taking a write lock.
-
+        try to regenerate a missing DB if local. This requires taking a
+        write lock.
         """
         if os.path.isfile(self._index_path):
-            # Read from JSON file if a JSON database exists
-            self._read_from_file(self._index_path, format='json')
+            current_verifier = ''
+            if _use_uuid:
+                try:
+                    with open(self._verifier_path, 'r') as f:
+                        current_verifier = f.read()
+                except BaseException:
+                    pass
+            if ((current_verifier != self.last_seen_verifier) or
+                    (current_verifier == '')):
+                self.last_seen_verifier = current_verifier
+                # Read from file if a database exists
+                self._read_from_file(self._index_path)
+            return
+        elif self.is_upstream:
+            raise UpstreamDatabaseLockingError(
+                "No database index file is present, and upstream"
+                " databases cannot generate an index file")
 
-        elif os.path.isfile(self._old_yaml_index_path):
-            if (not self.is_upstream) and os.access(
-                    self._db_dir, os.R_OK | os.W_OK):
-                # if we can write, then read AND write a JSON file.
-                self._read_from_file(self._old_yaml_index_path, format='yaml')
-                with lk.WriteTransaction(self.lock):
-                    self._write(None, None, None)
-            else:
-                # Read chck for a YAML file if we can't find JSON.
-                self._read_from_file(self._old_yaml_index_path, format='yaml')
-
-        else:
-            if self.is_upstream:
-                raise UpstreamDatabaseLockingError(
-                    "No database index file is present, and upstream"
-                    " databases cannot generate an index file")
-            # The file doesn't exist, try to traverse the directory.
-            # reindex() takes its own write lock, so no lock here.
-            with lk.WriteTransaction(self.lock):
-                self._write(None, None, None)
-            self.reindex(spack.store.layout)
+        # The file doesn't exist, try to traverse the directory.
+        # reindex() takes its own write lock, so no lock here.
+        with lk.WriteTransaction(self.lock):
+            self._write(None, None, None)
+        self.reindex(spack.store.layout)
 
     def _add(
             self,
@@ -1060,7 +1099,9 @@ class Database(object):
             )
 
             # Connect dependencies from the DB to the new copy.
-            for name, dep in iteritems(spec.dependencies_dict(_tracked_deps)):
+            for name, dep in six.iteritems(
+                    spec.dependencies_dict(_tracked_deps)
+            ):
                 dkey = dep.spec.dag_hash()
                 upstream, record = self.query_by_spec_hash(dkey)
                 new_spec._add_dependency(record.spec, dep.deptypes)
@@ -1133,8 +1174,7 @@ class Database(object):
         rec.ref_count += 1
 
     def _remove(self, spec):
-        """Non-locking version of remove(); does real work.
-        """
+        """Non-locking version of remove(); does real work."""
         key = self._get_matching_spec_key(spec)
         rec = self._data[key]
 
@@ -1144,6 +1184,12 @@ class Database(object):
 
         del self._data[key]
         for dep in rec.spec.dependencies(_tracked_deps):
+            # FIXME: the two lines below needs to be updated once #11983 is
+            # FIXME: fixed. The "if" statement should be deleted and specs are
+            # FIXME: to be removed from dependents by hash and not by name.
+            # FIXME: See https://github.com/spack/spack/pull/15777#issuecomment-607818955
+            if dep._dependents.get(spec.name):
+                del dep._dependents[spec.name]
             self._decrement_ref_count(dep)
 
         if rec.deprecated_for:
@@ -1378,7 +1424,7 @@ class Database(object):
             # TODO: handling of hashes restriction is not particularly elegant.
             hash_key = query_spec.dag_hash()
             if (hash_key in self._data and
-                (not hashes or hash_key in hashes)):
+                    (not hashes or hash_key in hashes)):
                 return [self._data[hash_key].spec]
             else:
                 return []

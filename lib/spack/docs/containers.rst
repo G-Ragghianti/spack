@@ -44,8 +44,8 @@ Environments:
    &&   echo "    install_tree: /opt/software" \
    &&   echo "  view: /opt/view") > /opt/spack-environment/spack.yaml
 
-   # Install the software, remove unecessary deps
-   RUN cd /opt/spack-environment && spack install && spack gc -y
+   # Install the software, remove unnecessary deps
+   RUN cd /opt/spack-environment && spack env activate . && spack install && spack gc -y
 
    # Strip all the binaries
    RUN find -L /opt/view/* -type f -exec readlink -f '{}' \; | \
@@ -108,7 +108,7 @@ are currently supported are summarized in the table below:
      - ``ubuntu:16.04``
      - ``spack/ubuntu-xenial``
    * - Ubuntu 18.04
-     - ``ubuntu:16.04``
+     - ``ubuntu:18.04``
      - ``spack/ubuntu-bionic``
    * - CentOS 6
      - ``centos:6``
@@ -165,7 +165,7 @@ of environments:
        # Extra instructions
        extra_instructions:
          final: |
-   RUN echo 'export PS1="\[$(tput bold)\]\[$(tput setaf 1)\][gromacs]\[$(tput setaf 2)\]\u\[$(tput sgr0)\]:\w $ \[$(tput sgr0)\]"' >> ~/.bashrc
+           RUN echo 'export PS1="\[$(tput bold)\]\[$(tput setaf 1)\][gromacs]\[$(tput setaf 2)\]\u\[$(tput sgr0)\]:\w $ \[$(tput sgr0)\]"' >> ~/.bashrc
 
        # Labels for the image
        labels:
@@ -266,8 +266,8 @@ following ``Dockerfile``:
    &&   echo "    install_tree: /opt/software" \
    &&   echo "  view: /opt/view") > /opt/spack-environment/spack.yaml
 
-   # Install the software, remove unecessary deps
-   RUN cd /opt/spack-environment && spack install && spack gc -y
+   # Install the software, remove unnecessary deps
+   RUN cd /opt/spack-environment && spack env activate . && spack install && spack gc -y
 
    # Strip all the binaries
    RUN find -L /opt/view/* -type f -exec readlink -f '{}' \; | \
