@@ -75,6 +75,14 @@ class Papi(AutotoolsPackage):
             env.set('PAPI_LMSENSORS_ROOT', self.spec['lm-sensors'].prefix)
         if '^cuda' in self.spec:
             env.set('PAPI_CUDA_ROOT', self.spec['cuda'].prefix)
+        if '+rocm' in self.spec:
+            env.set('PAPI_ROCM_ROOT', self.spec['hsa-rocr-dev'].prefix)
+            env.set('CFLAGS', '-I%s/rocprofiler/include' % self.spec['rocprofiler-dev'].prefix)
+            env.set('ROCP_METRICS', '%s/rocprofiler/lib/metrics.xml' % self.spec['rocprofiler-dev'].prefix)
+            env.set('ROCPROFILER_LOG', '1')
+            env.set('HSA_VEN_AMD_AQLPROFILE_LOG', '1')
+            env.set('AQLPROFILE_READ_API', '1')
+            env.set('HSA_TOOLS_LIB', 'librocprofiler64.60')
 
     setup_run_environment = setup_build_environment
 
