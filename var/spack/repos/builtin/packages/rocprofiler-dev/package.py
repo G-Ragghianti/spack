@@ -35,6 +35,7 @@ class RocprofilerDev(CMakePackage):
         version("5.1.0", sha256="4a1c6ed887b0159392406af8796508df2794353a4c3aacc801116044fb4a10a5")
 
     depends_on("cmake@3:", type="build")
+    depends_on("py-lxml", when="@5.5.1")
     for ver in ["5.1.0", "5.1.3", "5.2.0", "5.2.1", "5.2.3", "5.3.0", "5.3.3", "5.4.0", "5.4.3", "5.5.1", "5.6.1", "5.7.1", "6.0.2"]:
         depends_on(f"hsakmt-roct@{ver}", when=f"@{ver}")
         depends_on(f"hsa-rocr-dev@{ver}", when=f"@{ver}")
