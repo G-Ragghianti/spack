@@ -19,6 +19,10 @@ class RocprofilerDev(CMakePackage):
     maintainers("srekolam", "renjithravindrankannath")
     libraries = ["librocprofiler64"]
     license("MIT")
+    version("6.0.2", sha256="d3f24e639a5e151fa418a92ae6fe150bdf14120b8982a5baa52844ce2fba0b82")
+    version("5.7.1", sha256="2fb7158592d89312ba419a272d907d8849373c0a676a83dd03c32b9942dfd27a")
+    version("5.6.1", sha256="3e5eecce216418e61ffee893cbc8611e38305ee472d0e10d579eb74e287c8e1b")
+    version("5.5.1", sha256="f5dbece5c205e37383fed4a2bd6042ff1c11f11f64dfbf65d7e23c0af6889a5a")
     version("5.4.3", sha256="86c3f43ee6cb9808796a21409c853cc8fd496578b9eef4de67ca77830229cac1")
     version("5.4.0", sha256="0322cbe5d1d3182e616f472da31f0707ad6040833c38c28f2b39381a85210f43")
     version("5.3.3", sha256="07ee28f3420a07fc9d45910e78ad7961b388109cfc0e74cfdf2666789e6af171")
@@ -31,7 +35,7 @@ class RocprofilerDev(CMakePackage):
         version("5.1.0", sha256="4a1c6ed887b0159392406af8796508df2794353a4c3aacc801116044fb4a10a5")
 
     depends_on("cmake@3:", type="build")
-    for ver in ["5.1.0", "5.1.3", "5.2.0", "5.2.1", "5.2.3", "5.3.0", "5.3.3", "5.4.0", "5.4.3"]:
+    for ver in ["5.1.0", "5.1.3", "5.2.0", "5.2.1", "5.2.3", "5.3.0", "5.3.3", "5.4.0", "5.4.3", "5.5.1", "5.6.1", "5.7.1", "6.0.2"]:
         depends_on(f"hsakmt-roct@{ver}", when=f"@{ver}")
         depends_on(f"hsa-rocr-dev@{ver}", when=f"@{ver}")
         depends_on(f"rocminfo@{ver}", when=f"@{ver}")
