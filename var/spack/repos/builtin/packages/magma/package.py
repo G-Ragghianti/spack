@@ -206,7 +206,7 @@ class Magma(CMakePackage, CudaPackage, ROCmPackage):
         with working_dir(test_dir):
             pkg_config_path = self.prefix.lib.pkgconfig
             with spack.util.environment.set_env(PKG_CONFIG_PATH=pkg_config_path):
-
+                make = self.spec['gmake'].command
                 make("c")
                 tests = [
                     ("example_sparse", "sparse solver"),
@@ -231,6 +231,7 @@ class Magma(CMakePackage, CudaPackage, ROCmPackage):
         with working_dir(test_dir):
             pkg_config_path = self.prefix.lib.pkgconfig
             with spack.util.environment.set_env(PKG_CONFIG_PATH=pkg_config_path):
+                make = self.spec['gmake'].command
                 make("fortran")
                 example_f = which("example_f")
                 example_f()
