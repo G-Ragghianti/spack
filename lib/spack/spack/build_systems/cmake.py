@@ -155,7 +155,7 @@ def generator(*names: str, default: Optional[str] = None) -> None:
     variant(
         "generator",
         default=default,
-        values=_values,
+        values=allowed_values,
         description="the build system generator to use",
         when="build_system=cmake",
     )
