@@ -45,26 +45,38 @@ def set_variant(variant):
         return f"{variant.name}={value}"
 
 
+def is_valid_spec(spec):
+    try:
+        spack.cmd.parse_specs(spec, concretize=True)
+    except:
+        return False
+    return True
+
+
 def create_spec(name, recurse):
-    if name in spack.repo.PATH.provider_index.providers.keys():
-        name = rand.choice( spack.repo.PATH.providers_for(name) )
     spec = spack.spec.Spec(name)
     pkg_cls = spack.repo.PATH.get_pkg_class(spec.fullname)
     pkg = pkg_cls(spec)
 
     rspec = [pkg.name]
-    for name in pkg.variant_names():
-        for when, variant in pkg.variant_definitions(name):
-            rspec.append(set_variant(variant))
-
+    vname = rand.choice(pkg.variant_names())
+    aa,variant = pkg.variant_definitions(vname).pop()
+    rspec.append( set_variant(variant) )
+    cspec = spack.cmd.parse_specs(" ".join(rspec), concretize=True)
+    #print(cspec[0].format("{name}{@version}{%compiler.name}{@compiler.version} {variants}"))
+    print(cspec[0].long_spec)
+ 
     if recurse:
         for depname, extra in pkg.dependencies_by_name().items():
+            if depname in spack.repo.PATH.provider_index.providers.keys():
+                depname = rand.choice( spack.repo.PATH.providers_for(depname) )
             dep = create_spec(depname, False)
             rspec.append( f"^{dep}" )
 
+    rspec.append("\n")
     return " ".join(rspec)
 
 
 def random(parser, args):
-    print(create_spec(args.package, True))
+    print(create_spec(args.package, False))
 
