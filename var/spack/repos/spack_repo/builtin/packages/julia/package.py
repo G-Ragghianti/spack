@@ -244,7 +244,7 @@ class Julia(MakefilePackage):
     depends_on("mbedtls libs=shared")
     depends_on("mpfr")
     depends_on("nghttp2")
-    depends_on("openblas +ilp64 symbol_suffix=64_")
+    depends_on("openblas +ilp64")
     depends_on("openlibm", when="+openlibm")
     depends_on("p7zip")
     depends_on("pcre2")
