@@ -53,6 +53,7 @@ class Papi(AutotoolsPackage, ROCmPackage):
     variant("cuda", default=False, description="Enable CUDA support")
     variant("nvml", default=False, description="Enable NVML support")
     variant("rocm_smi", default=False, description="Enable ROCm SMI support")
+    variant("rocp_sdk", default=False, description="Enable ROCp support")
     variant(
         "rdpmc",
         default=True,
@@ -80,7 +81,9 @@ class Papi(AutotoolsPackage, ROCmPackage):
     depends_on("llvm-amdgpu", when="+rocm")
     depends_on("rocm-openmp-extras", when="+rocm")
     depends_on("rocm-smi-lib", when="+rocm_smi")
+    depends_on("rocprofiler-sdk", when="+rocp_sdk")
 
+    conflicts("+rocp_sdk", when="@:7.1.0")
     conflicts("%gcc@8:", when="@5.3.0", msg="Requires GCC version less than 8.0")
     conflicts("+sde", when="@:5", msg="Software defined events (SDE) added in 6.0.0")
     conflicts("^cuda", when="@:5", msg="CUDA support for versions < 6.0.0 not implemented")
@@ -125,6 +128,8 @@ class Papi(AutotoolsPackage, ROCmPackage):
             env.set("AQLPROFILE_READ_API", "1")
         if "+rocm_smi" in spec:
             env.append_flags("CFLAGS", "-I%s/rocm_smi" % spec["rocm-smi-lib"].prefix.include)
+        if "+rocp_sdk" in spec:
+            env.set("PAPI_ROCP_SDK_ROOT", spec["rocprofiler-sdk"].prefix)
         #
         # Intel OneAPI LLVM cannot compile papi unless the DBG enviroment variable is cleared
         #
@@ -158,6 +163,7 @@ class Papi(AutotoolsPackage, ROCmPackage):
                 "nvml",
                 "rocm",
                 "rocm_smi",
+                "rocp_sdk",
             ],
         )
         if components:
@@ -174,6 +180,11 @@ class Papi(AutotoolsPackage, ROCmPackage):
 
         if "+debug" in spec:
             options.append("--with-debug=yes")
+
+        #if self.run_tests:
+        #    options.append("--with-tests=ctests")
+        #else:
+        #    options.append("--with-tests=no")
 
         return options
 
