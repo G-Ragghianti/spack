@@ -30,7 +30,7 @@ class Papi(AutotoolsPackage, ROCmPackage):
 
     license("BSD-3-Clause")
 
-    version("master", branch="master")
+    version("master", git="https://github.com/G-Ragghianti/papi", branch="gragghia/rocm-smi")
     version("7.1.0", sha256="5818afb6dba3ece57f51e65897db5062f8e3464e6ed294b654ebf34c3991bc4f")
     version("7.0.1", sha256="c105da5d8fea7b113b0741a943d467a06c98db959ce71bdd9a50b9f03eecc43e")
     # Note: version 7.0.0 is omitted due to build issues, see PR 33940 for more information
