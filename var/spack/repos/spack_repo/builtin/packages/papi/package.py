@@ -53,6 +53,7 @@ class Papi(AutotoolsPackage, ROCmPackage):
     variant("cuda", default=False, description="Enable CUDA support")
     variant("nvml", default=False, description="Enable NVML support")
     variant("rocm_smi", default=False, description="Enable ROCm SMI support")
+    variant("rocp_sdk", default=False, description="Enable ROCp support")
     variant(
         "rdpmc",
         default=True,
@@ -80,7 +81,10 @@ class Papi(AutotoolsPackage, ROCmPackage):
     depends_on("llvm-amdgpu", when="+rocm")
     depends_on("rocm-openmp-extras", when="+rocm")
     depends_on("rocm-smi-lib", when="+rocm_smi")
+    depends_on("rocprofiler-sdk", when="+rocp_sdk")
 
+    #conflicts("+rocp_sdk", when="@:7.1.0")
+    conflicts("~rocm", when="+rocp_sdk", msg="ROCp-SDK requires ROCm")
     conflicts("%gcc@8:", when="@5.3.0", msg="Requires GCC version less than 8.0")
     conflicts("+sde", when="@:5", msg="Software defined events (SDE) added in 6.0.0")
     conflicts("^cuda", when="@:5", msg="CUDA support for versions < 6.0.0 not implemented")
@@ -117,14 +121,17 @@ class Papi(AutotoolsPackage, ROCmPackage):
             env.set("HSA_TOOLS_LIB", "%s/librocprofiler64.so" % spec["rocprofiler-dev"].prefix.lib)
             env.append_flags("CFLAGS", "-I%s/rocprofiler/include" % spec["rocprofiler-dev"].prefix)
             env.append_flags("LDFLAGS", "-L%s/lib" % spec["llvm-amdgpu"].prefix)
-            env.set(
-                "ROCP_METRICS", "%s/rocprofiler/lib/metrics.xml" % spec["rocprofiler-dev"].prefix
-            )
+            metrics = find(spec["rocprofiler-dev"].prefix, "metrics.xml", recursive=True)[0]
+            env.set("ROCP_METRICS", metrics)
             env.set("ROCPROFILER_LOG", "1")
             env.set("HSA_VEN_AMD_AQLPROFILE_LOG", "1")
             env.set("AQLPROFILE_READ_API", "1")
         if "+rocm_smi" in spec:
+            env.set("PAPI_ROCMSMI_ROOT", spec["rocm-smi-lib"].prefix)
             env.append_flags("CFLAGS", "-I%s/rocm_smi" % spec["rocm-smi-lib"].prefix.include)
+        if "+rocp_sdk" in spec:
+            env.set("PAPI_ROCP_SDK_ROOT", spec["rocprofiler-sdk"].prefix)
+            env.append_flags("LDFLAGS", "-L%s/lib" % spec["hsa-rocr-dev"].prefix)
         #
         # Intel OneAPI LLVM cannot compile papi unless the DBG enviroment variable is cleared
         #
@@ -158,6 +165,7 @@ class Papi(AutotoolsPackage, ROCmPackage):
                 "nvml",
                 "rocm",
                 "rocm_smi",
+                "rocp_sdk",
             ],
         )
         if components:
@@ -174,6 +182,9 @@ class Papi(AutotoolsPackage, ROCmPackage):
 
         if "+debug" in spec:
             options.append("--with-debug=yes")
+
+        if not self.run_tests:
+            options.append("--with-tests=no")
 
         return options
 
