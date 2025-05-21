@@ -128,12 +128,12 @@ class Papi(AutotoolsPackage, ROCmPackage):
             env.set("AQLPROFILE_READ_API", "1")
         if "+rocm_smi" in spec:
             env.set("PAPI_ROCMSMI_ROOT", spec["rocm-smi-lib"].prefix)
-            if self.run_tests:
-                env.set("HIPCC", spec["hip"].hipcc)
             env.append_flags("CFLAGS", "-I%s/rocm_smi" % spec["rocm-smi-lib"].prefix.include)
         if "+rocp_sdk" in spec:
             env.set("PAPI_ROCP_SDK_ROOT", spec["rocprofiler-sdk"].prefix)
             env.append_flags("LDFLAGS", "-L%s/lib" % spec["hsa-rocr-dev"].prefix)
+        if self.run_tests and self.spec["hip"]:
+            env.set("HIPCC", spec["hip"].hipcc)
         #
         # Intel OneAPI LLVM cannot compile papi unless the DBG enviroment variable is cleared
         #
