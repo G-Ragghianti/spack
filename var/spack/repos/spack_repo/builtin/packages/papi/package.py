@@ -78,7 +78,7 @@ class Papi(AutotoolsPackage, ROCmPackage):
     depends_on("bc", when="+cuda", type="build")
     depends_on("hsa-rocr-dev", when="+rocm")
     depends_on("rocprofiler-dev", when="+rocm")
-    depends_on("llvm-amdgpu", when="+rocm")
+    #depends_on("llvm-amdgpu", when="+rocm")
     #depends_on("rocm-openmp-extras", when="+rocm")
     depends_on("rocm-smi-lib", when="+rocm_smi")
     depends_on("rocprofiler-sdk", when="+rocp_sdk")
@@ -120,7 +120,7 @@ class Papi(AutotoolsPackage, ROCmPackage):
             env.set("PAPI_ROCM_ROOT", spec["hsa-rocr-dev"].prefix)
             env.set("HSA_TOOLS_LIB", "%s/librocprofiler64.so" % spec["rocprofiler-dev"].prefix.lib)
             env.append_flags("CFLAGS", "-I%s/rocprofiler/include" % spec["rocprofiler-dev"].prefix)
-            env.append_flags("LDFLAGS", "-L%s/lib" % spec["llvm-amdgpu"].prefix)
+            #env.append_flags("LDFLAGS", "-L%s/lib" % spec["llvm-amdgpu"].prefix)
             metrics = find(spec["rocprofiler-dev"].prefix, "metrics.xml", recursive=True)[0]
             env.set("ROCP_METRICS", metrics)
             env.set("ROCPROFILER_LOG", "1")
