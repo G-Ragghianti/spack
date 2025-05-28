@@ -79,7 +79,7 @@ class Papi(AutotoolsPackage, ROCmPackage):
     depends_on("hsa-rocr-dev", when="+rocm")
     depends_on("rocprofiler-dev", when="+rocm")
     depends_on("llvm-amdgpu", when="+rocm")
-    depends_on("rocm-openmp-extras", when="+rocm")
+    #depends_on("rocm-openmp-extras", when="+rocm")
     depends_on("rocm-smi-lib", when="+rocm_smi")
     depends_on("rocprofiler-sdk", when="+rocp_sdk")
 
